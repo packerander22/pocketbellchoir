@@ -430,7 +430,9 @@
       const gain = audioCtx.createGain();
 
       osc.type = "sine";
-      // One octave up for a clearer bell feel
+      // Make sure there are no stale scheduled values before setting frequency
+      osc.frequency.cancelScheduledValues(now);
+      // One octave up for a clearer bell feel, constant for whole sustain
       osc.frequency.setValueAtTime(baseFreq * 2, now);
 
       const vel = Math.min(Math.max(velocity, 0), 1);
@@ -505,27 +507,37 @@
 
     function computeVisualDirFromBuildVector() {
       const ax = buildAx;
+      const ay = buildAy;
       const az = buildAz;
 
       const absX = Math.abs(ax);
+      const absY = Math.abs(ay);
       const absZ = Math.abs(az);
 
-      // Forward/back dominates -> map to up/down (Z takes precedence)
-      if (absZ > 0.8) {
+      const maxComponent = Math.max(absX, absY, absZ);
+
+      // No strong dominant axis: fallback to horizontal tilt
+      if (maxComponent < 0.8) {
+        return Math.random() < 0.5 ? "left" : "right";
+      }
+
+      // Dominant axis decides the visual
+      if (maxComponent === absX) {
+        // Horizontal dominates -> left/right
         // Phone upright, screen facing you:
+        // swing right (ax > 0) -> bell left
+        return ax > 0 ? "left" : "right";
+      } else if (maxComponent === absZ) {
+        // Forward/back dominates -> up/down
         // swing away (forward) ≈ az < 0 -> bell moves down
         // swing toward you ≈ az > 0 -> bell moves up
         return az < 0 ? "down" : "up";
+      } else {
+        // Vertical (Y) dominates -> treat like forward/back
+        // down swing same as toward you, up swing same as away from you
+        // In many coordinate systems, ay > 0 is "up" acceleration
+        return ay > 0 ? "down" : "up";
       }
-
-      // Horizontal dominates -> map to left/right
-      if (absX > 0.8) {
-        // swing right (ax > 0) -> bell left
-        return ax > 0 ? "left" : "right";
-      }
-
-      // Fallback: small/noisy movement, just tilt horizontally
-      return Math.random() < 0.5 ? "left" : "right";
     }
 
     function handleMotion(event) {
