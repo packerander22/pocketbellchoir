@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Bell Phone Choir</title>
+  <title>Pocket BellChoir</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     :root {
@@ -305,7 +305,7 @@
       <div class="title-row">
         <div class="title">
           <span class="wave">🔔</span>
-          Bell Phone Choir
+          Pocket BellChoir
         </div>
       </div>
       <p class="subtitle">
@@ -324,7 +324,7 @@
       </div>
 
       <div class="perm-banner" id="perm-banner">
-        Some phones (especially iPhones) require permission for motion sensors.
+        On iPhone, tap “Enable motion” and allow access when Safari asks.
         <button id="req-permission-btn">Enable motion</button>
       </div>
     </div>
@@ -336,7 +336,7 @@
     </button>
 
     <div class="play-note-label" id="play-note-label">C</div>
-    <div class="play-note-sub" id="play-note-sub">Boomwhacker Color</div>
+    <div class="play-note-sub" id="play-note-sub">Boomwhacker-style color</div>
 
     <div class="sensitivity-pill">
       🎚️ Swing strength → volume
@@ -349,12 +349,12 @@
     <div class="motion-hints">
       Hold your phone like a handbell and swing in a natural bell-ringing motion.
       A gentle swing produces a soft ring; a stronger swing rings louder.
+      You can also tap the bell if motion doesn’t work.
     </div>
   </div>
 
   <script>
     // ---- NOTE DATA (Boomwhacker-style mapping) ----
-    // Colors approximate classic Boomwhacker tubes
     const NOTES = [
       { name: "C", octave: 4, color: "#FF0000" }, // red
       { name: "D", octave: 4, color: "#FF7F00" }, // orange
@@ -388,7 +388,6 @@
     function freqForNote(name, octave) {
       const semitoneMap = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
       const n = semitoneMap[name] + (octave - 4) * 12;
-      // A4 = 440Hz, C4 is -9 semitones from A4
       const a4Index = 9;
       const noteIndex = n;
       const semitonesFromA4 = noteIndex - a4Index;
@@ -398,6 +397,12 @@
     function playBell(note, velocity = 1) {
       if (!note) return;
       ensureAudioCtx();
+
+      // extra safety for iOS: resume if suspended
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+
       const now = audioCtx.currentTime;
 
       const osc = audioCtx.createOscillator();
@@ -408,10 +413,10 @@
       osc.type = "sine";
       osc.frequency.setValueAtTime(baseFreq * 2, now);
 
-      // Volume based on velocity (0-1), but ease it a bit
+      // Volume based on velocity (0-1), with a higher base for iOS
       const maxGain = 0.6;
       const vel = Math.min(Math.max(velocity, 0), 1);
-      const startGain = 0.02 + vel * (maxGain - 0.02);
+      const startGain = 0.08 + vel * (maxGain - 0.08);
 
       gain.gain.setValueAtTime(startGain, now);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.3);
@@ -481,11 +486,11 @@
             permBanner.style.display = "none";
             return true;
           } else {
-            alert("Motion permission was not granted. You can still tap the bell to test sound.");
+            alert("Motion permission denied. You can still tap the bell to ring.");
             return false;
           }
         } else {
-          // Non iOS devices typically don't need explicit permission
+          // Non-iOS devices or older iOS that doesn't need explicit permission
           permBanner.style.display = "none";
           return true;
         }
@@ -508,7 +513,7 @@
 
       startMotionListening();
 
-      // Also allow tap on bell as fallback (if motion doesn't work)
+      // Fallback: tap the bell to ring
       bellVisual.onclick = () => playBell(currentNote, 0.7);
     }
 
@@ -539,12 +544,24 @@
         btn.appendChild(sub);
 
         btn.addEventListener("click", async () => {
-          // Audio context must start in user gesture
           ensureAudioCtx();
+
+          // Make sure audio is actually running (iOS requirement)
+          if (audioCtx.state === "suspended") {
+            try {
+              await audioCtx.resume();
+            } catch (e) {
+              console.warn("Audio resume failed:", e);
+            }
+          }
 
           // Try to request motion permission on supported devices
           await requestMotionPermission();
+
           showPlayScreen(n);
+
+          // Optional: immediate confirmation ding
+          playBell(n, 0.7);
         });
 
         noteGrid.appendChild(btn);
