@@ -460,7 +460,7 @@
       const minAngle = 10;   // degrees
       const maxAngle = 32;   // degrees
       const amp = minAngle + (maxAngle - minAngle) * vel;
-      const verticalOffset = amp * 1.5; // px
+      const verticalOffset = amp; // same scale as tilt for consistency
 
       let dir = visualDir;
       if (!dir) {
@@ -505,38 +505,42 @@
     let buildAx = 0, buildAy = 0, buildAz = 0;
     let haveBuildVector = false;
 
+    // Lock to four cardinal visual directions based on a collapsed 2D vector:
+    // horizontal (left/right) vs combined vertical (away/up vs toward/down).
     function computeVisualDirFromBuildVector() {
       const ax = buildAx;
       const ay = buildAy;
       const az = buildAz;
 
-      const absX = Math.abs(ax);
-      const absY = Math.abs(ay);
-      const absZ = Math.abs(az);
+      // Interpret coordinates for an upright phone, screen facing you:
+      // - X: left/right
+      // - Z: forward/back
+      // - Y: up/down
+      //
+      // We combine "up + away" vs "down + toward" into one vertical axis.
+      const horiz = ax;                  // right positive, left negative
+      const vertCombined = (-az) + (-ay);
+      //  -az: away (forward) => positive, toward => negative
+      //  -ay: up => positive, down => negative
+      // So positive vertCombined ≈ up/away, negative ≈ down/toward.
 
-      const maxComponent = Math.max(absX, absY, absZ);
+      const absH = Math.abs(horiz);
+      const absV = Math.abs(vertCombined);
 
-      // No strong dominant axis: fallback to horizontal tilt
-      if (maxComponent < 0.8) {
+      // If there's not a clear winner, bail to a simple horizontal tilt
+      if (absH < 0.8 && absV < 0.8) {
         return Math.random() < 0.5 ? "left" : "right";
       }
 
-      // Dominant axis decides the visual
-      if (maxComponent === absX) {
+      if (absH > absV) {
         // Horizontal dominates -> left/right
-        // Phone upright, screen facing you:
-        // swing right (ax > 0) -> bell left
-        return ax > 0 ? "left" : "right";
-      } else if (maxComponent === absZ) {
-        // Forward/back dominates -> up/down
-        // swing away (forward) ≈ az < 0 -> bell moves down
-        // swing toward you ≈ az > 0 -> bell moves up
-        return az < 0 ? "down" : "up";
+        // Swing right (horiz > 0) -> bell moves left
+        return horiz > 0 ? "left" : "right";
       } else {
-        // Vertical (Y) dominates -> treat like forward/back
-        // down swing same as toward you, up swing same as away from you
-        // In many coordinate systems, ay > 0 is "up" acceleration
-        return ay > 0 ? "down" : "up";
+        // Vertical dominates -> up/down-like
+        // Positive (up/away) -> bell down
+        // Negative (down/toward) -> bell up
+        return vertCombined > 0 ? "down" : "up";
       }
     }
 
