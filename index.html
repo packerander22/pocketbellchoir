@@ -351,7 +351,8 @@
       return 440 * Math.pow(2, semitonesFromA4 / 12);
     }
 
-    // velocity here becomes gain (we'll keep it 0.7–1.5 for loudness)
+    // One pure sine note, loud as we can go without adding overtones
+    // velocity 0..1 -> gain 0.7..1.0
     // visualDir: -1 or +1 for swing direction; null => random
     function playBell(note, velocity = 1, visualDir = null) {
       if (!note) return;
@@ -366,27 +367,28 @@
 
       const baseFreq = freqForNote(note.name, note.octave);
 
-      // Single pure tone: no overtones
+      // Single pure tone
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
 
       osc.type = "sine";
-      // Use the note frequency (or 1 octave up if you prefer: baseFreq * 2)
-      osc.frequency.setValueAtTime(baseFreq, now);
+      // Slightly higher (bell-like) but still the same note (one octave up)
+      osc.frequency.setValueAtTime(baseFreq * 2, now);
 
       const vel = Math.min(Math.max(velocity, 0), 1);
       const minVol = 0.7;
-      const maxVol = 1.5; // >1 => a bit of clipping, louder
+      const maxVol = 1.0; // 1.0 = max clean amplitude without intentional clipping
       const gainValue = minVol + vel * (maxVol - minVol);
 
       gain.gain.setValueAtTime(gainValue, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.0);
+      // Slightly shorter ring so it feels punchy
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
 
       osc.connect(gain);
       gain.connect(audioCtx.destination);
 
       osc.start(now);
-      osc.stop(now + 1.1);
+      osc.stop(now + 1.0);
 
       // Visual: outer ring swings like a real bell (pivot around top)
       const minAngle = 10;   // degrees
@@ -403,51 +405,18 @@
       }, 180);
     }
 
-    // ---- MOTION HANDLING (peak + directional change, directional visual) ----
+    // ---- MOTION HANDLING (peak + directional change, direction-based visual) ----
     let currentNote = null;
     let lastRingTime = 0;
 
-    const MIN_INTERVAL     = 280;    // ms between rings
-    const DELTA_RING_MIN   = 5.0;    // harder minimum threshold to trigger
-    const DELTA_RING_MAX   = 10.0;   // strong swing -> full volume
-    const RESET_DELTA      = 1.5;    // below this, swing ends
+    const MIN_INTERVAL     = 280;   // ms between rings
+    const DELTA_RING_MIN   = 6.0;   // slightly harder minimum threshold
+    const DELTA_RING_MAX   = 10.0;  // strong swing = full volume
+    const RESET_DELTA      = 1.5;   // below this, swing ends
 
     let inSwing = false;
     let lastMagnitude = null;
-    let lastDelta = 0;               // previous signed delta
-
-    // For visual direction: store the "build-up" direction vector
-    let buildAx = 0;
-    let buildAy = 0;
-    let buildAz = 0;
-
-    function computeVisualDirectionFromBuildVector() {
-      // Pick the axis with the largest magnitude and move opposite it
-      const ax = buildAx;
-      const ay = buildAy;
-      const az = buildAz;
-
-      const absX = Math.abs(ax);
-      const absY = Math.abs(ay);
-      const absZ = Math.abs(az);
-
-      // default direction
-      let dir = 1;
-
-      if (absX >= absY && absX >= absZ) {
-        // horizontal swing: right/left
-        // if initial acceleration was +X (to the right), bell swings left => dir = -1
-        dir = ax > 0 ? -1 : 1;
-      } else if (absY >= absX && absY >= absZ) {
-        // vertical swing: up/down; map to left/right visually
-        dir = ay > 0 ? -1 : 1;
-      } else {
-        // forward/back swing (Z); also map to left/right
-        dir = az > 0 ? -1 : 1;
-      }
-
-      return dir;
-    }
+    let lastDelta = 0;              // previous signed delta
 
     function handleMotion(event) {
       if (!currentNote) return;
@@ -466,23 +435,12 @@
 
       if (lastMagnitude === null) {
         lastMagnitude = magnitude;
-        buildAx = ax;
-        buildAy = ay;
-        buildAz = az;
         return;
       }
 
       const signedDelta = magnitude - lastMagnitude; // positive/negative jerk
       const absDelta = Math.abs(signedDelta);
       const now = performance.now();
-
-      // Track build direction when we cross some motion
-      if (absDelta > DELTA_RING_MIN && Math.abs(lastDelta) <= absDelta) {
-        // store latest "strong" acceleration vector as build direction
-        buildAx = ax;
-        buildAy = ay;
-        buildAz = az;
-      }
 
       // Reset swing when jerk settles
       if (absDelta < RESET_DELTA) {
@@ -520,7 +478,12 @@
           const maxVel = 1.0;
           const velocity = minVel + t * (maxVel - minVel);
 
-          const visualDir = computeVisualDirectionFromBuildVector();
+          // Visual direction: opposite the initial swing
+          // If we were building with positive lastDelta, swing bell negative, and vice versa
+          let visualDir = 0;
+          if (lastDelta > 0) visualDir = -1;
+          else if (lastDelta < 0) visualDir = 1;
+          else visualDir = Math.random() < 0.5 ? -1 : 1;
 
           playBell(currentNote, velocity, visualDir);
         }
@@ -534,9 +497,6 @@
       lastMagnitude = null;
       lastDelta = 0;
       inSwing = false;
-      buildAx = 0;
-      buildAy = 0;
-      buildAz = 0;
       window.addEventListener("devicemotion", handleMotion);
     }
 
