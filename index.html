@@ -261,7 +261,7 @@
       left: 0.7rem;
       top: 50%;
       transform: translateY(-50%);
-      display: flex;
+      display: none;
       flex-direction: column;
       align-items: center;
       gap: 0.3rem;
@@ -271,8 +271,7 @@
     }
 
     .volume-label {
-      writing-mode: vertical-rl;
-      text-orientation: mixed;
+      font-size: 0.75rem;
     }
 
     .volume-slider {
@@ -367,7 +366,7 @@
     </button>
 
     <!-- Volume slider on left -->
-    <div class="volume-wrapper" id="volume-wrapper" style="display:none;">
+    <div class="volume-wrapper" id="volume-wrapper">
       <div class="volume-label">VOL</div>
       <input
         type="range"
@@ -467,6 +466,13 @@
       }
     }
 
+    function resetAudioContextOnReturn() {
+      if (audioCtx && audioCtx.state !== "closed") {
+        audioCtx.close().catch(() => {});
+      }
+      audioCtx = null;
+    }
+
     function freqForNote(name, octave) {
       const semitoneMap = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
       const n = semitoneMap[name] + (octave - 4) * 12;
@@ -482,6 +488,16 @@
       return "Long";
     }
 
+    // Headphone warning (blocking)
+    let headphoneWarningShown = false;
+    function showHeadphoneWarningOnce() {
+      if (headphoneWarningShown) return;
+      headphoneWarningShown = true;
+      alert(
+        "Important: Please DO NOT use headphones when using this app.\n\nThe bells can be very loud."
+      );
+    }
+
     // initialize sustain label from default slider value
     sustainValueLabel.textContent = labelForSustain(parseFloat(sustainSlider.value));
 
@@ -495,9 +511,9 @@
       volumeMaxGain = parseFloat(volumeSlider.value);
     });
 
-    // One pure sine note, loud as we can go without adding overtones.
-    // velocity 0..1 -> gain from 1..volumeMaxGain
-    function playBell(note, velocity = 1, visualDir = null) {
+    // One pure sine note, loud. velocity 0..1 -> gain 1..volumeMaxGain
+    // Also uses a short attack "ping" then lower sustain for a clearer initial ring.
+    function playBell(note, intensity = 1, visualDir = null) {
       if (!note) return;
       ensureAudioCtx();
       if (!audioCtx) return;
@@ -516,31 +532,39 @@
       osc.frequency.cancelScheduledValues(now);
       osc.frequency.setValueAtTime(baseFreq * 2, now); // one octave up
 
-      const vel = Math.min(Math.max(velocity, 0), 1);
+      const t = Math.min(Math.max(intensity, 0), 1);
       const minVol = 1.0;
-      const maxVol = volumeMaxGain; // slider-controlled
-      const gainValue = minVol + vel * (maxVol - minVol);
+      const maxVol = volumeMaxGain;
+      const maxGain = minVol + t * (maxVol - minVol); // linear 1..10
 
-      gain.gain.setValueAtTime(gainValue, now);
-
-      const MIN_SUSTAIN = 1.0; // seconds
-      const MAX_SUSTAIN = 5.0; // seconds
+      // Envelope: strong initial strike, then sustain lower
+      const ATTACK_TIME = 0.04; // 40 ms
+      const MIN_SUSTAIN = 1.0;
+      const MAX_SUSTAIN = 5.0;
       const sustainDuration =
         MIN_SUSTAIN + sustainFactor * (MAX_SUSTAIN - MIN_SUSTAIN);
 
+      const sustainLevel = maxGain * 0.6; // lingering part slightly quieter
+
+      // Attack
+      gain.gain.setValueAtTime(maxGain, now);
+      // Drop to sustain level quickly
+      gain.gain.linearRampToValueAtTime(sustainLevel, now + ATTACK_TIME);
+      // Then decay over sustainDuration
       gain.gain.exponentialRampToValueAtTime(0.0001, now + sustainDuration);
 
       osc.connect(gain);
       gain.connect(audioCtx.destination);
 
       osc.start(now);
-      osc.stop(now + sustainDuration + 0.1);
+      osc.stop(now + sustainDuration + 0.2);
 
       // ---- Visual bell animation ----
       const minAngle = 10;   // degrees
       const maxAngle = 32;   // degrees
+      const vel = t;         // reuse intensity for visual amplitude
       const amp = minAngle + (maxAngle - minAngle) * vel;
-      const offset = amp;    // px, used for both axes
+      const offset = amp;    // px
 
       let dir = visualDir;
       if (!dir) {
@@ -566,7 +590,7 @@
       }, 180);
     }
 
-    // ---- MOTION HANDLING (peak + directional change) ----
+    // ---- MOTION HANDLING (peak + directional change, visual based on jerk) ----
     let currentNote = null;
     let lastRingTime = 0;
 
@@ -579,25 +603,27 @@
     let lastMagnitude = null;
     let lastDelta = 0;              // previous signed delta
 
-    // Decide visual direction from *current* acceleration
-    function computeVisualDirFromAccel(ax, ay, az) {
-      const absX = Math.abs(ax);
-      const absY = Math.abs(ay);
-      const absZ = Math.abs(az);
+    let lastAx = null, lastAy = null, lastAz = null;
+
+    // Choose direction from jerk vector (change in acceleration)
+    function computeVisualDirFromJerk(jx, jy, jz) {
+      const absX = Math.abs(jx);
+      const absY = Math.abs(jy);
+      const absZ = Math.abs(jz);
 
       const maxComp = Math.max(absX, absY, absZ);
+      const MIN_JERK = 0.3; // noise floor for jerk
 
-      if (maxComp < 0.8) {
+      if (maxComp < MIN_JERK) {
         return Math.random() < 0.5 ? "left" : "right";
       }
 
       if (maxComp === absX) {
-        return ax > 0 ? "right" : "left";
+        return jx > 0 ? "right" : "left";
       } else if (maxComp === absY) {
-        return ay > 0 ? "up" : "down";
+        return jy > 0 ? "up" : "down";
       } else {
-        // Z axis: positive out of screen (toward you)
-        return az > 0 ? "up" : "down";
+        return jz > 0 ? "up" : "down";
       }
     }
 
@@ -616,19 +642,28 @@
 
       const magnitude = Math.sqrt(ax * ax + ay * ay + az * az);
 
-      if (lastMagnitude === null) {
+      if (lastMagnitude === null || lastAx === null) {
         lastMagnitude = magnitude;
+        lastAx = ax;
+        lastAy = ay;
+        lastAz = az;
         return;
       }
+
+      const jx = ax - lastAx;
+      const jy = ay - lastAy;
+      const jz = az - lastAz;
 
       const signedDelta = magnitude - lastMagnitude;
       const absDelta = Math.abs(signedDelta);
       const now = performance.now();
 
+      // Reset swing when jerk settles
       if (absDelta < RESET_DELTA) {
         inSwing = false;
       }
 
+      // Look for a reversal in jerk to mimic "swing then catch"
       const prevSign = Math.sign(lastDelta);
       const currSign = Math.sign(signedDelta);
       const wasBuilding = Math.abs(lastDelta) > DELTA_RING_MIN;
@@ -647,28 +682,28 @@
           inSwing = true;
           lastRingTime = now;
 
+          // Normalize peak to 0..1, linear
           const clamped = Math.min(Math.max(peak, DELTA_RING_MIN), DELTA_RING_MAX);
-          let t = (clamped - DELTA_RING_MIN) / (DELTA_RING_MAX - DELTA_RING_MIN);
+          const intensity =
+            (clamped - DELTA_RING_MIN) / (DELTA_RING_MAX - DELTA_RING_MIN); // 0..1
 
-          t = Math.pow(t, 0.6);
+          const visualDir = computeVisualDirFromJerk(jx, jy, jz);
 
-          const minVel = 0.3;
-          const maxVel = 1.0;
-          const velocity = minVel + t * (maxVel - minVel);
-
-          const visualDir = computeVisualDirFromAccel(ax, ay, az);
-
-          playBell(currentNote, velocity, visualDir);
+          playBell(currentNote, intensity, visualDir);
         }
       }
 
       lastMagnitude = magnitude;
       lastDelta = signedDelta;
+      lastAx = ax;
+      lastAy = ay;
+      lastAz = az;
     }
 
     function startMotionListening() {
       lastMagnitude = null;
       lastDelta = 0;
+      lastAx = lastAy = lastAz = null;
       inSwing = false;
       window.addEventListener("devicemotion", handleMotion);
     }
@@ -677,6 +712,7 @@
       window.removeEventListener("devicemotion", handleMotion);
       lastMagnitude = null;
       lastDelta = 0;
+      lastAx = lastAy = lastAz = null;
       inSwing = false;
     }
 
@@ -709,12 +745,12 @@
         alert(
           "Motion access was denied. Enable Motion & Orientation in Settings → Safari (and for this site) to use the shake feature."
         );
-        // Stay on motion screen until permission is actually granted
         return;
       }
 
       motionScreen.style.display = "none";
       noteScreen.style.display = "block";
+      showHeadphoneWarningOnce();
     });
 
     function showPlayScreen(note) {
@@ -738,7 +774,7 @@
 
     backBtn.addEventListener("click", showNoteScreen);
 
-    // Tap note text or bell to ring (full loudness, random visual dir)
+    // Tap note text or bell to ring (full intensity, random visual dir)
     playNoteLabel.addEventListener("click", () => {
       if (currentNote) playBell(currentNote, 1, null);
     });
@@ -758,6 +794,7 @@
         btn.addEventListener("click", async () => {
           await resumeAudioCtx();
           showPlayScreen(n);
+          // Confirmation ping at full intensity
           playBell(n, 1, null);
         });
 
@@ -767,7 +804,20 @@
 
     initNoteButtons();
 
-    // Extra safety: try to resume audio on any touchstart
+    // Auto-skip motion screen when explicit permission API isn't needed
+    window.addEventListener("load", () => {
+      const needsExplicitPermission =
+        typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function";
+
+      if (!needsExplicitPermission) {
+        motionScreen.style.display = "none";
+        noteScreen.style.display = "block";
+        showHeadphoneWarningOnce();
+      }
+    });
+
+    // Extra safety: try to resume / create audio on any touchstart
     window.addEventListener(
       "touchstart",
       () => {
@@ -776,19 +826,19 @@
       { passive: true }
     );
 
-    // Try to resume audio when coming back to the tab / page / focus
+    // When coming back to the tab / page, reset audio context so next gesture makes a fresh, non-muted one
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
-        resumeAudioCtx();
+        resetAudioContextOnReturn();
       }
     });
 
     window.addEventListener("pageshow", () => {
-      resumeAudioCtx();
+      resetAudioContextOnReturn();
     });
 
     window.addEventListener("focus", () => {
-      resumeAudioCtx();
+      resetAudioContextOnReturn();
     });
   </script>
 </body>
