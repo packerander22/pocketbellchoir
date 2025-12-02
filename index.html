@@ -432,8 +432,8 @@
       osc.frequency.setValueAtTime(baseFreq * 2, now); // one octave up
 
       const vel = Math.min(Math.max(velocity, 0), 1);
-      const minVol = 0.7;
-      const maxVol = 5.0;
+      const minVol = 1.0;
+      const maxVol = 10.0;
       const gainValue = minVol + vel * (maxVol - minVol);
 
       gain.gain.setValueAtTime(gainValue, now);
