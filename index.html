@@ -204,7 +204,7 @@
         rgba(248,250,252,0.7) 40%,
         rgba(248,250,252,0.25) 100%);
       box-shadow: 0 12px 26px rgba(15, 23, 42, 0.45);
-      /* 🔧 Center pivot so left/right swings don't sit lower */
+      /* Center pivot so left/right don't sit low */
       transform-origin: 50% 50%;
       transform: translateY(0px) rotate(0deg);
       transition: transform 0.09s ease-out;
@@ -414,7 +414,7 @@
 
     // One pure sine note, loud as we can go without adding overtones.
     // velocity 0..1 -> gain 0.7..1.0
-    // visualDir: "left" | "right" | "up" | "down" | diagonals | null
+    // visualDir: direction string like "left", "up-right", etc.
     function playBell(note, velocity = 1, visualDir = null) {
       if (!note) return;
       ensureAudioCtx();
@@ -461,47 +461,47 @@
       const minAngle = 10;   // degrees
       const maxAngle = 32;   // degrees
       const amp = minAngle + (maxAngle - minAngle) * vel;
-      const offset = amp; // same for x and y for consistency
+      const verticalOffset = amp; // same scale for all
 
       let dir = visualDir;
       if (!dir) {
-        const dirs = ["left","right","up","down","up-right","up-left","down-right","down-left"];
-        dir = dirs[Math.floor(Math.random() * dirs.length)];
+        dir = Math.random() < 0.5 ? "left" : "right";
       }
 
       let transform;
+
       switch (dir) {
         case "left":
-          transform = `translate(0px, 0px) rotate(${-amp}deg)`;
+          transform = `translateY(0px) rotate(${-amp}deg)`;
           break;
         case "right":
-          transform = `translate(0px, 0px) rotate(${amp}deg)`;
+          transform = `translateY(0px) rotate(${amp}deg)`;
           break;
         case "up":
-          transform = `translate(0px, ${-offset}px) rotate(0deg)`;
+          transform = `translateY(${-verticalOffset}px) rotate(0deg)`;
           break;
         case "down":
-          transform = `translate(0px, ${offset}px) rotate(0deg)`;
+          transform = `translateY(${verticalOffset}px) rotate(0deg)`;
           break;
         case "up-right":
-          transform = `translate(${offset}px, ${-offset}px) rotate(${amp / 2}deg)`;
+          transform = `translateY(${-verticalOffset}px) rotate(${amp / 1.2}deg)`;
           break;
         case "up-left":
-          transform = `translate(${-offset}px, ${-offset}px) rotate(${-amp / 2}deg)`;
+          transform = `translateY(${-verticalOffset}px) rotate(${-amp / 1.2}deg)`;
           break;
         case "down-right":
-          transform = `translate(${offset}px, ${offset}px) rotate(${amp / 2}deg)`;
+          transform = `translateY(${verticalOffset}px) rotate(${amp / 1.2}deg)`;
           break;
         case "down-left":
-          transform = `translate(${-offset}px, ${offset}px) rotate(${-amp / 2}deg)`;
+          transform = `translateY(${verticalOffset}px) rotate(${-amp / 1.2}deg)`;
           break;
         default:
-          transform = `translate(0px, 0px) rotate(${(Math.random() < 0.5 ? -1 : 1) * amp}deg)`;
+          transform = `translateY(0px) rotate(${(Math.random() < 0.5 ? -1 : 1) * amp}deg)`;
       }
 
       bellRing.style.transform = transform;
       setTimeout(() => {
-        bellRing.style.transform = "translate(0px, 0px) rotate(0deg)";
+        bellRing.style.transform = "translateY(0px) rotate(0deg)";
       }, 180);
     }
 
@@ -518,34 +518,44 @@
     let lastMagnitude = null;
     let lastDelta = 0;              // previous signed delta
 
-    // Decide visual direction from *current* acceleration, with diagonals
+    // Decide visual direction from *current* acceleration, with diagonals.
+    // Phone upright, screen facing you:
+    //  - X: left/right in screen plane
+    //  - Y: up/down in screen plane
+    //  - Z: toward/away (out of screen is +Z)
     function computeVisualDirFromAccel(ax, ay, az) {
-      // Screen-space mapping for upright phone, screen facing you:
-      // horiz: X axis (right positive)
-      // vert: combine "up + away" vs "down + toward"
+      // Collapse into a 2D vector in "screen" space:
+      // horiz: X = left/right
+      // vert: Y (up/down) + Z (toward/away mapped as vertical)
       const horiz = ax;
-      const vert = (-az) + (-ay); // up/away positive, down/toward negative
+      const vert = ay + az; // toward (az>0) contributes to "up", away to "down"
 
       const mag = Math.sqrt(horiz * horiz + vert * vert);
       if (mag < 0.8) {
-        // Too small / noisy: fallback
-        const dirs = ["left","right","up","down"];
-        return dirs[Math.floor(Math.random() * dirs.length)];
+        // too noisy / tiny, just wobble horizontally
+        return Math.random() < 0.5 ? "left" : "right";
       }
 
-      const angle = Math.atan2(vert, horiz); // -PI .. PI
-      const deg = angle * (180 / Math.PI);
+      // Angle in degrees, 0 = right, 90 = up, 180 = left, 270 = down
+      let angle = Math.atan2(vert, horiz); // radians
+      let deg = angle * (180 / Math.PI);
+      if (deg < 0) deg += 360; // 0..360
 
-      // Snap to nearest 45-degree sector
-      if (deg > -22.5 && deg <= 22.5) return "right";
-      if (deg > 22.5 && deg <= 67.5) return "up-right";
-      if (deg > 67.5 && deg <= 112.5) return "up";
-      if (deg > 112.5 && deg <= 157.5) return "up-left";
-      if (deg > 157.5 || deg <= -157.5) return "left";
-      if (deg > -157.5 && deg <= -112.5) return "down-left";
-      if (deg > -112.5 && deg <= -67.5) return "down";
-      // -67.5 .. -22.5
-      return "down-right";
+      // Snap to nearest 45° sector
+      const sector = Math.round(deg / 45) % 8;
+
+      switch (sector) {
+        case 0: return "right";       //   0°
+        case 1: return "up-right";    //  45°
+        case 2: return "up";          //  90°
+        case 3: return "up-left";     // 135°
+        case 4: return "left";        // 180°
+        case 5: return "down-left";   // 225°
+        case 6: return "down";        // 270°
+        case 7: return "down-right";  // 315°
+        default:
+          return "right";
+      }
     }
 
     function handleMotion(event) {
@@ -679,7 +689,7 @@
 
     backBtn.addEventListener("click", showNoteScreen);
 
-    // Tap note text or bell to ring (full loudness, random visual dir)
+    // Tap note text or bell to ring (full loudness, no direction)
     playNoteLabel.addEventListener("click", () => {
       if (currentNote) playBell(currentNote, 1, null);
     });
