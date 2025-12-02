@@ -204,9 +204,10 @@
         rgba(248,250,252,0.7) 40%,
         rgba(248,250,252,0.25) 100%);
       box-shadow: 0 12px 26px rgba(15, 23, 42, 0.45);
-      /* Center pivot so left/right don't sit low */
+
+      /* 🔧 rotate around center so left/right doesn’t droop */
       transform-origin: 50% 50%;
-      transform: translateY(0px) rotate(0deg);
+      transform: translate(0px, 0px) rotate(0deg);
       transition: transform 0.09s ease-out;
     }
 
@@ -412,9 +413,9 @@
       sustainValueLabel.textContent = labelForSustain(sustainFactor);
     });
 
-    // One pure sine note, loud as we can go without adding overtones.
+    // Play one pure sine note, loud & stable pitch.
     // velocity 0..1 -> gain 0.7..1.0
-    // visualDir: direction string like "left", "up-right", etc.
+    // visualDir: "left" | "right" | "up" | "down" | diagonals
     function playBell(note, velocity = 1, visualDir = null) {
       if (!note) return;
       ensureAudioCtx();
@@ -431,10 +432,8 @@
       const gain = audioCtx.createGain();
 
       osc.type = "sine";
-      // Make sure there are no stale scheduled values before setting frequency
       osc.frequency.cancelScheduledValues(now);
-      // One octave up for a clearer bell feel, constant for whole sustain
-      osc.frequency.setValueAtTime(baseFreq * 2, now);
+      osc.frequency.setValueAtTime(baseFreq * 2, now); // one octave up, fixed
 
       const vel = Math.min(Math.max(velocity, 0), 1);
       const minVol = 0.7;
@@ -443,7 +442,6 @@
 
       gain.gain.setValueAtTime(gainValue, now);
 
-      // Sustain: min ≈ old 50%, max ≈ 5s
       const MIN_SUSTAIN = 1.375; // seconds
       const MAX_SUSTAIN = 5.0;   // seconds
       const sustainDuration =
@@ -457,55 +455,55 @@
       osc.start(now);
       osc.stop(now + sustainDuration + 0.1);
 
-      // ---- Visual bell animation ----
+      // ---- Visual bell animation (8 directions) ----
       const minAngle = 10;   // degrees
       const maxAngle = 32;   // degrees
       const amp = minAngle + (maxAngle - minAngle) * vel;
-      const verticalOffset = amp; // same scale for all
 
-      let dir = visualDir;
-      if (!dir) {
-        dir = Math.random() < 0.5 ? "left" : "right";
-      }
+      const offset = amp; // px; same magnitude for all directions
+      const diagOffset = offset / Math.SQRT2;
+      const diagAngle = amp * 0.6;
+
+      let dir = visualDir || (Math.random() < 0.5 ? "left" : "right");
 
       let transform;
-
       switch (dir) {
         case "left":
-          transform = `translateY(0px) rotate(${-amp}deg)`;
+          transform = `translate(0px, 0px) rotate(${-amp}deg)`;
           break;
         case "right":
-          transform = `translateY(0px) rotate(${amp}deg)`;
+          transform = `translate(0px, 0px) rotate(${amp}deg)`;
           break;
         case "up":
-          transform = `translateY(${-verticalOffset}px) rotate(0deg)`;
+          transform = `translate(0px, ${-offset}px) rotate(0deg)`;
           break;
         case "down":
-          transform = `translateY(${verticalOffset}px) rotate(0deg)`;
+          transform = `translate(0px, ${offset}px) rotate(0deg)`;
           break;
         case "up-right":
-          transform = `translateY(${-verticalOffset}px) rotate(${amp / 1.2}deg)`;
+          transform = `translate(${diagOffset}px, ${-diagOffset}px) rotate(${diagAngle}deg)`;
           break;
         case "up-left":
-          transform = `translateY(${-verticalOffset}px) rotate(${-amp / 1.2}deg)`;
+          transform = `translate(${-diagOffset}px, ${-diagOffset}px) rotate(${-diagAngle}deg)`;
           break;
         case "down-right":
-          transform = `translateY(${verticalOffset}px) rotate(${amp / 1.2}deg)`;
+          transform = `translate(${diagOffset}px, ${diagOffset}px) rotate(${diagAngle}deg)`;
           break;
         case "down-left":
-          transform = `translateY(${verticalOffset}px) rotate(${-amp / 1.2}deg)`;
+          transform = `translate(${-diagOffset}px, ${diagOffset}px) rotate(${-diagAngle}deg)`;
           break;
         default:
-          transform = `translateY(0px) rotate(${(Math.random() < 0.5 ? -1 : 1) * amp}deg)`;
+          transform = `translate(0px, 0px) rotate(${(Math.random() < 0.5 ? -1 : 1) * amp}deg)`;
+          break;
       }
 
       bellRing.style.transform = transform;
       setTimeout(() => {
-        bellRing.style.transform = "translateY(0px) rotate(0deg)";
+        bellRing.style.transform = "translate(0px, 0px) rotate(0deg)";
       }, 180);
     }
 
-    // ---- MOTION HANDLING (peak + directional change) ----
+    // ---- MOTION HANDLING (strike on reversal) ----
     let currentNote = null;
     let lastRingTime = 0;
 
@@ -516,46 +514,34 @@
 
     let inSwing = false;
     let lastMagnitude = null;
-    let lastDelta = 0;              // previous signed delta
+    let lastDelta = 0;
 
-    // Decide visual direction from *current* acceleration, with diagonals.
-    // Phone upright, screen facing you:
-    //  - X: left/right in screen plane
-    //  - Y: up/down in screen plane
-    //  - Z: toward/away (out of screen is +Z)
+    // Convert raw accel to a 2D "screen-space" vector and snap to 8 directions
     function computeVisualDirFromAccel(ax, ay, az) {
-      // Collapse into a 2D vector in "screen" space:
-      // horiz: X = left/right
-      // vert: Y (up/down) + Z (toward/away mapped as vertical)
-      const horiz = ax;
-      const vert = ay + az; // toward (az>0) contributes to "up", away to "down"
+      // Approx screen X: phone's X axis
+      const screenX = ax;
+      // Approx screen Y: combine up/down (Y) and toward/away (Z)
+      // Positive = up/away, negative = down/toward
+      const screenY = ay + az;
 
-      const mag = Math.sqrt(horiz * horiz + vert * vert);
+      const mag = Math.sqrt(screenX * screenX + screenY * screenY);
       if (mag < 0.8) {
-        // too noisy / tiny, just wobble horizontally
         return Math.random() < 0.5 ? "left" : "right";
       }
 
-      // Angle in degrees, 0 = right, 90 = up, 180 = left, 270 = down
-      let angle = Math.atan2(vert, horiz); // radians
-      let deg = angle * (180 / Math.PI);
-      if (deg < 0) deg += 360; // 0..360
+      const angle = Math.atan2(screenY, screenX); // radians, -PI..PI
+      const deg = angle * 180 / Math.PI;
 
       // Snap to nearest 45° sector
-      const sector = Math.round(deg / 45) % 8;
-
-      switch (sector) {
-        case 0: return "right";       //   0°
-        case 1: return "up-right";    //  45°
-        case 2: return "up";          //  90°
-        case 3: return "up-left";     // 135°
-        case 4: return "left";        // 180°
-        case 5: return "down-left";   // 225°
-        case 6: return "down";        // 270°
-        case 7: return "down-right";  // 315°
-        default:
-          return "right";
-      }
+      if (deg > -22.5 && deg <= 22.5) return "right";
+      if (deg > 22.5 && deg <= 67.5) return "up-right";
+      if (deg > 67.5 && deg <= 112.5) return "up";
+      if (deg > 112.5 && deg <= 157.5) return "up-left";
+      if (deg > 157.5 || deg <= -157.5) return "left";
+      if (deg > -157.5 && deg <= -112.5) return "down-left";
+      if (deg > -112.5 && deg <= -67.5) return "down";
+      // -67.5 .. -22.5
+      return "down-right";
     }
 
     function handleMotion(event) {
@@ -582,12 +568,12 @@
       const absDelta = Math.abs(signedDelta);
       const now = performance.now();
 
-      // Reset swing when jerk settles
+      // Reset when calm
       if (absDelta < RESET_DELTA) {
         inSwing = false;
       }
 
-      // Look for a reversal in jerk to mimic "swing then catch"
+      // Look for jerk reversal (swing direction change)
       const prevSign = Math.sign(lastDelta);
       const currSign = Math.sign(signedDelta);
       const wasBuilding = Math.abs(lastDelta) > DELTA_RING_MIN;
@@ -608,17 +594,14 @@
 
           // Map peak from [DELTA_RING_MIN .. DELTA_RING_MAX] -> [0..1]
           const clamped = Math.min(Math.max(peak, DELTA_RING_MIN), DELTA_RING_MAX);
-          let t = (clamped - DELTA_RING_MIN) / (DELTA_RING_MAX - DELTA_RING_MIN); // 0..1
+          let t = (clamped - DELTA_RING_MIN) / (DELTA_RING_MAX - DELTA_RING_MIN);
 
-          // Steep ramp so moderate swings are already loud
           t = Math.pow(t, 0.6);
 
-          // Convert t to velocity: 0.3..1 so even min is decently loud
           const minVel = 0.3;
           const maxVel = 1.0;
           const velocity = minVel + t * (maxVel - minVel);
 
-          // Visual direction is based on the *current* acceleration vector
           const visualDir = computeVisualDirFromAccel(ax, ay, az);
 
           playBell(currentNote, velocity, visualDir);
@@ -689,7 +672,7 @@
 
     backBtn.addEventListener("click", showNoteScreen);
 
-    // Tap note text or bell to ring (full loudness, no direction)
+    // Tap note text or bell to ring (full loudness, random visual dir)
     playNoteLabel.addEventListener("click", () => {
       if (currentNote) playBell(currentNote, 1, null);
     });
