@@ -512,8 +512,9 @@
     });
 
 
-    // One pure sine note. intensity 0..1 -> baseGain 1..volumeMaxGain (linear).
-    // Big sharp hit, quick drop, long quiet tail.
+    // One pure sine note.
+    // intensity 0..1 -> baseGain 1..volumeMaxGain (linear).
+    // Envelope: huge initial ding, aggressive smooth drop, same total sustain time.
     function playBell(note, intensity = 1, visualDir = null) {
       if (!note) return;
       ensureAudioCtx();
@@ -531,54 +532,52 @@
     
       osc.type = "sine";
       osc.frequency.cancelScheduledValues(now);
-      osc.frequency.setValueAtTime(baseFreq * 2, now); // one octave up
+      // One octave up for bell-ish feel
+      osc.frequency.setValueAtTime(baseFreq * 2, now);
     
       const t = Math.min(Math.max(intensity, 0), 1);
       const minVol = 1.0;
-      const maxVol = volumeMaxGain; // 1..10 from your slider
+      const maxVol = volumeMaxGain; // 1..10 from your volume slider
       const baseGain = minVol + t * (maxVol - minVol); // 1..10 linear
     
-      // === ENVELOPE: big spike, quick drop, long tail ===
-      const ATTACK_HOLD = 0.1; // 15 ms full blast
-      const DROP_TIME   = 0.5;  // fast drop into tail
-    
+      // ---- ENVELOPE ----
+      // Total sustain time still controlled by slider:
       const MIN_SUSTAIN = 1.0;
       const MAX_SUSTAIN = 5.0;
       const sustainDuration =
         MIN_SUSTAIN + sustainFactor * (MAX_SUSTAIN - MIN_SUSTAIN);
     
-      // VERY quiet tail relative to the hit
-      const sustainLevel = baseGain * 1.0; // 10% of the hit
+      // Where we want the "ring level" to land after the big drop
+      const ringLevel = baseGain * 0.08; // 8% of the hit – quiet but audible
     
-      // 1) Instant strike at full baseGain
+      // Use the first 20% of the sustain to aggressively, smoothly drop
+      const fastDropEnd = now + sustainDuration * 0.2;
+      const tailEnd     = now + sustainDuration;
+    
+      // 1) Big initial ding at full baseGain
       gain.gain.setValueAtTime(baseGain, now);
-      // 2) Hold the hit briefly
-      gain.gain.setValueAtTime(baseGain, now + ATTACK_HOLD);
-      // 3) Drop quickly to quiet tail
-      gain.gain.linearRampToValueAtTime(
-        sustainLevel,
-        now + ATTACK_HOLD + DROP_TIME
-      );
-      // 4) Let that quiet tail ring for the full sustainDuration
-      gain.gain.exponentialRampToValueAtTime(
-        0.0001,
-        now + sustainDuration
-      );
+    
+      // 2) Smooth but aggressive exponential drop to ringLevel
+      gain.gain.exponentialRampToValueAtTime(ringLevel, fastDropEnd);
+    
+      // 3) Then let that quiet ring glide down smoothly for the rest of sustain
+      gain.gain.exponentialRampToValueAtTime(0.0001, tailEnd);
     
       osc.connect(gain);
       gain.connect(audioCtx.destination);
     
       osc.start(now);
-      osc.stop(now + sustainDuration + 0.2);
+      osc.stop(tailEnd + 0.2);
     
-      // ---- your visual bell code stays the same ----
-      const minAngle = 10;
-      const maxAngle = 32;
+      // ---- Visual bell animation (same as before) ----
+      const minAngle = 10;   // degrees
+      const maxAngle = 32;   // degrees
       const vel = t;
       const amp = minAngle + (maxAngle - minAngle) * vel;
       const offset = amp;
     
       let dir = visualDir || (Math.random() < 0.5 ? "left" : "right");
+    
       let transform;
       if (dir === "left") {
         transform = `translate(${-offset}px, 0px) rotate(0deg)`;
