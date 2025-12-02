@@ -539,8 +539,8 @@
       const baseGain = minVol + t * (maxVol - minVol); // 1..10 linear
     
       // === ENVELOPE: big spike, quick drop, long tail ===
-      const ATTACK_HOLD = 0.015; // 15 ms full blast
-      const DROP_TIME   = 0.06;  // fast drop into tail
+      const ATTACK_HOLD = 0.02; // 15 ms full blast
+      const DROP_TIME   = 0.05;  // fast drop into tail
     
       const MIN_SUSTAIN = 1.0;
       const MAX_SUSTAIN = 5.0;
@@ -548,7 +548,7 @@
         MIN_SUSTAIN + sustainFactor * (MAX_SUSTAIN - MIN_SUSTAIN);
     
       // VERY quiet tail relative to the hit
-      const sustainLevel = baseGain * 0.10; // 10% of the hit
+      const sustainLevel = baseGain * 0.05; // 10% of the hit
     
       // 1) Instant strike at full baseGain
       gain.gain.setValueAtTime(baseGain, now);
