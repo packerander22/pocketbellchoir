@@ -511,8 +511,8 @@
       volumeMaxGain = parseFloat(volumeSlider.value);
     });
 
-    // One pure sine note, loud. velocity 0..1 -> gain 1..volumeMaxGain
-    // Also uses a short attack "ping" then lower sustain for a clearer initial ring.
+    // One pure sine note. intensity 0..1 -> baseGain 1..volumeMaxGain (linear).
+    // Envelope: strong initial hit at baseGain, fast drop to lower sustain, then long decay.
     function playBell(note, intensity = 1, visualDir = null) {
       if (!note) return;
       ensureAudioCtx();
@@ -535,22 +535,26 @@
       const t = Math.min(Math.max(intensity, 0), 1);
       const minVol = 1.0;
       const maxVol = volumeMaxGain;
-      const maxGain = minVol + t * (maxVol - minVol); // linear 1..10
+      const baseGain = minVol + t * (maxVol - minVol); // strictly 1..10, linear
 
-      // Envelope: strong initial strike, then sustain lower
-      const ATTACK_TIME = 0.04; // 40 ms
-      const MIN_SUSTAIN = 1.0;
-      const MAX_SUSTAIN = 5.0;
+      const ATTACK_HOLD = 0.03; // 30 ms hold at full "strike" level
+      const DROP_TIME = 0.08;   // then drop quickly to sustain
+
+      const MIN_SUSTAIN = 1.0;  // seconds
+      const MAX_SUSTAIN = 5.0;  // seconds
       const sustainDuration =
         MIN_SUSTAIN + sustainFactor * (MAX_SUSTAIN - MIN_SUSTAIN);
 
-      const sustainLevel = maxGain * 0.6; // lingering part slightly quieter
+      const sustainLevel = baseGain * 0.25; // lingering tail much quieter
 
-      // Attack
-      gain.gain.setValueAtTime(maxGain, now);
-      // Drop to sustain level quickly
-      gain.gain.linearRampToValueAtTime(sustainLevel, now + ATTACK_TIME);
-      // Then decay over sustainDuration
+      // Envelope:
+      // 1) Immediate strike at baseGain
+      // 2) Hold very briefly
+      // 3) Fast drop to sustainLevel
+      // 4) Long decay from sustainLevel down to ~0
+      gain.gain.setValueAtTime(baseGain, now);
+      gain.gain.setValueAtTime(baseGain, now + ATTACK_HOLD);
+      gain.gain.linearRampToValueAtTime(sustainLevel, now + ATTACK_HOLD + DROP_TIME);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + sustainDuration);
 
       osc.connect(gain);
@@ -619,7 +623,8 @@
       }
 
       if (maxComp === absX) {
-        return jx > 0 ? "right" : "left";
+        // FLIPPED X MAPPING: jerk to the right -> visual LEFT, and vice versa
+        return jx > 0 ? "left" : "right";
       } else if (maxComp === absY) {
         return jy > 0 ? "up" : "down";
       } else {
