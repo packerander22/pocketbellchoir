@@ -204,7 +204,7 @@
         rgba(248,250,252,0.7) 40%,
         rgba(248,250,252,0.25) 100%);
       box-shadow: 0 12px 26px rgba(15, 23, 42, 0.45);
-      /* Center pivot so left/right don't sag */
+      /* 🔧 Center pivot so left/right swings don't sit lower */
       transform-origin: 50% 50%;
       transform: translateY(0px) rotate(0deg);
       transition: transform 0.09s ease-out;
@@ -461,11 +461,12 @@
       const minAngle = 10;   // degrees
       const maxAngle = 32;   // degrees
       const amp = minAngle + (maxAngle - minAngle) * vel;
-      const offset = amp; // same magnitude in all directions
+      const offset = amp; // same for x and y for consistency
 
       let dir = visualDir;
       if (!dir) {
-        dir = Math.random() < 0.5 ? "left" : "right";
+        const dirs = ["left","right","up","down","up-right","up-left","down-right","down-left"];
+        dir = dirs[Math.floor(Math.random() * dirs.length)];
       }
 
       let transform;
@@ -483,16 +484,16 @@
           transform = `translate(0px, ${offset}px) rotate(0deg)`;
           break;
         case "up-right":
-          transform = `translate(${offset * 0.7}px, ${-offset * 0.7}px) rotate(${amp * 0.6}deg)`;
+          transform = `translate(${offset}px, ${-offset}px) rotate(${amp / 2}deg)`;
           break;
         case "up-left":
-          transform = `translate(${-offset * 0.7}px, ${-offset * 0.7}px) rotate(${-amp * 0.6}deg)`;
+          transform = `translate(${-offset}px, ${-offset}px) rotate(${-amp / 2}deg)`;
           break;
         case "down-right":
-          transform = `translate(${offset * 0.7}px, ${offset * 0.7}px) rotate(${amp * 0.6}deg)`;
+          transform = `translate(${offset}px, ${offset}px) rotate(${amp / 2}deg)`;
           break;
         case "down-left":
-          transform = `translate(${-offset * 0.7}px, ${offset * 0.7}px) rotate(${-amp * 0.6}deg)`;
+          transform = `translate(${-offset}px, ${offset}px) rotate(${-amp / 2}deg)`;
           break;
         default:
           transform = `translate(0px, 0px) rotate(${(Math.random() < 0.5 ? -1 : 1) * amp}deg)`;
@@ -504,7 +505,7 @@
       }, 180);
     }
 
-    // ---- MOTION HANDLING (peak + directional change, with 8-way visual) ----
+    // ---- MOTION HANDLING (peak + directional change) ----
     let currentNote = null;
     let lastRingTime = 0;
 
@@ -517,47 +518,34 @@
     let lastMagnitude = null;
     let lastDelta = 0;              // previous signed delta
 
-    // Decide visual direction from *current* acceleration, with diagonals.
+    // Decide visual direction from *current* acceleration, with diagonals
     function computeVisualDirFromAccel(ax, ay, az) {
-      // Collapse into screen-space 2D:
-      // horiz = X (left/right)
-      // vert  = combination of away/up vs toward/down
+      // Screen-space mapping for upright phone, screen facing you:
+      // horiz: X axis (right positive)
+      // vert: combine "up + away" vs "down + toward"
       const horiz = ax;
-      const vert = (-az) + (-ay);
-      //  -az: away (forward) => positive, toward => negative
-      //  -ay: up => positive, down => negative
+      const vert = (-az) + (-ay); // up/away positive, down/toward negative
 
       const mag = Math.sqrt(horiz * horiz + vert * vert);
       if (mag < 0.8) {
-        // Too small / noisy -> fallback
-        return Math.random() < 0.5 ? "left" : "right";
+        // Too small / noisy: fallback
+        const dirs = ["left","right","up","down"];
+        return dirs[Math.floor(Math.random() * dirs.length)];
       }
 
-      const angle = Math.atan2(vert, horiz); // -π..π, 0 = right, π/2 = up
+      const angle = Math.atan2(vert, horiz); // -PI .. PI
+      const deg = angle * (180 / Math.PI);
 
-      const step = Math.PI / 4; // 45°
-      let idx = Math.round(angle / step); // snap to nearest 45°
-      idx = (idx + 8) % 8; // normalize to 0..7
-
-      // 0: right
-      // 1: up-right
-      // 2: up
-      // 3: up-left
-      // 4: left
-      // 5: down-left
-      // 6: down
-      // 7: down-right
-      switch (idx) {
-        case 0: return "right";
-        case 1: return "up-right";
-        case 2: return "up";
-        case 3: return "up-left";
-        case 4: return "left";
-        case 5: return "down-left";
-        case 6: return "down";
-        case 7: return "down-right";
-        default: return "right";
-      }
+      // Snap to nearest 45-degree sector
+      if (deg > -22.5 && deg <= 22.5) return "right";
+      if (deg > 22.5 && deg <= 67.5) return "up-right";
+      if (deg > 67.5 && deg <= 112.5) return "up";
+      if (deg > 112.5 && deg <= 157.5) return "up-left";
+      if (deg > 157.5 || deg <= -157.5) return "left";
+      if (deg > -157.5 && deg <= -112.5) return "down-left";
+      if (deg > -112.5 && deg <= -67.5) return "down";
+      // -67.5 .. -22.5
+      return "down-right";
     }
 
     function handleMotion(event) {
@@ -620,7 +608,7 @@
           const maxVel = 1.0;
           const velocity = minVel + t * (maxVel - minVel);
 
-          // Visual direction is based on the *current* acceleration vector, snapped to 8 dirs
+          // Visual direction is based on the *current* acceleration vector
           const visualDir = computeVisualDirFromAccel(ax, ay, az);
 
           playBell(currentNote, velocity, visualDir);
