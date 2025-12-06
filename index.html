@@ -20,6 +20,10 @@
   <link rel="icon" type="image/png" sizes="512x512" href="favicons/favicon_512_transparent.png">
   <link rel="icon" type="image/png" sizes="2048x2048" href="favicons/favicon_2048_transparent.png">
 
+  <!-- Generic / legacy favicon hooks -->
+  <link rel="icon" href="favicons/favicon_192_transparent.png" type="image/png">
+  <link rel="shortcut icon" href="favicons/favicon_192_transparent.png" type="image/png">
+
   <!-- iOS home-screen icon -->
   <link rel="apple-touch-icon" href="favicons/favicon_180_transparent.png">
 
@@ -55,20 +59,26 @@
       display: flex;
       align-items: stretch;
       justify-content: center;
+      position: relative;
+    }
+
+    /* Global logo that sits above all screens, without affecting layout */
+    .global-logo {
+      position: fixed;
+      top: 1.1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 96px;         /* tweak as you like */
+      height: auto;
+      z-index: 20;
+      pointer-events: none; /* taps go through on mobile */
     }
 
     .app {
       width: 100%;
       max-width: 480px;
       margin: auto;
-      padding: 1.5rem 1.2rem 2.5rem;
-    }
-
-    /* Logo above cards */
-    .logo-header {
-      width: 120px;
-      display: block;
-      margin: 0 auto 1rem;
+      padding: 3rem 1.2rem 2.5rem; /* extra top padding so card doesn't clash with logo */
     }
 
     .card {
@@ -303,10 +313,15 @@
   </style>
 </head>
 <body>
+  <!-- Global logo that sits above both the motion + tiles screens -->
+  <img
+    class="global-logo"
+    src="favicons/favicon_512_transparent.png"
+    alt="PocketChimes Logo"
+  />
+
   <!-- MOTION PERMISSION SCREEN -->
   <div class="app" id="motion-screen">
-    <img class="logo-header" src="favicons/favicon_512_transparent.png" alt="PocketChimes Logo">
-
     <div class="card">
       <div class="title">PocketChimes</div>
       <p class="subtitle">
@@ -321,8 +336,6 @@
 
   <!-- NOTE SELECTION SCREEN -->
   <div class="app" id="note-screen" style="display:none;">
-    <img class="logo-header" src="favicons/favicon_512_transparent.png" alt="PocketChimes Logo">
-
     <div class="note-card">
       <div class="note-title">Choose your note</div>
       <div class="note-subtitle">
